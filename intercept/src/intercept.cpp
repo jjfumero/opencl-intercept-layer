@@ -1908,16 +1908,17 @@ void CLIntercept::getPlatformInfoString(
     if( platform && m_PlatformInfoMap.find(platform) != m_PlatformInfoMap.end() )
     {
         str += m_PlatformInfoMap.at(platform).Name;
-        {
-            char    s[256];
-            CLI_SPRINTF( s, 256, " (%p)",
-                platform );
-            str += s;
-        }
     }
     else
     {
-        str += "ERROR";
+        str += "Unknown";
+    }
+
+    {
+        char    s[256];
+        CLI_SPRINTF( s, 256, " (%p)",
+            platform );
+        str += s;
     }
 }
 
@@ -5876,13 +5877,30 @@ void CLIntercept::getTimingTagsKernel(
             size_t  suggestedLWS[3] = { 0, 0, 0 };
             size_t  emptyGWO[3] = { 0, 0, 0 };
 
-            if( lws == NULL &&
+            if( config().DevicePerformanceTimeSuggestedLWSTracking &&
+                lws == NULL &&
                 workDim <= 3 &&
-                config().DevicePerformanceTimeSuggestedLWSTracking )
+                device )
             {
+                // Try the OpenCL 3.1 core API first.
+                const SDeviceInfo& deviceInfo = m_DeviceInfoMap[device];
+                if( useSuggestedLWS == false &&
+                    deviceInfo.NumericVersion >= CL_MAKE_VERSION_KHR(3, 1, 0) &&
+                    dispatch().clGetKernelSuggestedLocalWorkSize )
+                {
+                    cl_int testErrorCode = dispatch().clGetKernelSuggestedLocalWorkSize(
+                        queue,
+                        kernel,
+                        workDim,
+                        gwo,
+                        gws,
+                        suggestedLWS );
+                    useSuggestedLWS = ( testErrorCode == CL_SUCCESS );
+                }
+
                 cl_platform_id  platform = getPlatform(device);
 
-                // Try the cl_khr_suggested_local_work_size version first.
+                // Try the cl_khr_suggested_local_work_size version next.
                 if( useSuggestedLWS == false )
                 {
                     if( dispatchX(platform).clGetKernelSuggestedLocalWorkSizeKHR == NULL )
@@ -13794,6 +13812,9 @@ bool CLIntercept::initDispatch( const std::string& libName )
         INIT_EXPORTED_FUNC(clCreateBufferWithProperties);
         INIT_EXPORTED_FUNC(clCreateImageWithProperties);
         INIT_EXPORTED_FUNC(clSetContextDestructorCallback);
+
+        // OpenCL 3.1 Entry Points (optional)
+        INIT_EXPORTED_FUNC(clGetKernelSuggestedLocalWorkSize);
 
         success = savedSuccess;
     }
